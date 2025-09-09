@@ -19,6 +19,8 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -34,6 +36,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -44,7 +47,10 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+uint8_t tx_buffer[3];   // Bytes sent to ADC
+uint8_t rx_buffer[3];   // Bytes received from ADC
+uint16_t adc_value;     // 10-bit ADC result
+#define adc_channel 0   // Change based on schematic connection
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -87,20 +93,59 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
-  /* USER CODE BEGIN 2 */
+  MX_SPI1_Init();
+  MX_SPI2_Init();
+  MX_TIM1_Init();
 
+  /* USER CODE BEGIN 2 */
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1); // start PWM
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
+  while(1)
   {
-    /* USER CODE END WHILE */
+      // Read 10-bit ADC value (0-1023)
+      adc_value = read_adc(adc_channel);
 
-    /* USER CODE BEGIN 3 */
+      // Map ADC to PWM counts (1-2 ms pulse width)
+      uint16_t pulse_counts = 500 + ((adc_value * 500) / 1023);
+
+      // Set PWM duty cycle
+      __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_counts);
+
+      // Delay to prevent ADC overload
+      HAL_Delay(10);
   }
+
   /* USER CODE END 3 */
 }
+
+/* USER CODE BEGIN 4 */
+uint16_t read_adc(uint8_t channel)
+{
+    uint16_t value = 0;
+
+    // Bring CS low
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET); // adjust GPIO port/pin
+
+    // Build command to send to ADC
+    tx_buffer[0] = 0x01; // start bit
+    tx_buffer[1] = 0x80 | (channel << 4); // single-ended + channel + leading zeros
+    tx_buffer[2] = 0x00; // third byte to receive remaining bits
+
+    // Send and receive 3 bytes over SPI (full duplex)
+    HAL_SPI_TransmitReceive(&hspi1, tx_buffer, rx_buffer, 3, HAL_MAX_DELAY);
+
+    // Bring CS high
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET); // adjust GPIO port/pin
+
+    // Combine the received bits into 10-bit ADC value
+    value = ((rx_buffer[1] & 0x03) << 8) | rx_buffer[2];
+
+    return value;
+}
+/* USER CODE END 4 */
 
 /**
   * @brief System Clock Configuration
@@ -108,43 +153,39 @@ int main(void)
   */
 void SystemClock_Config(void)
 {
-  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+  RCC_OscInitTypeDef rcc_osc_init_struct = {0};
+  RCC_ClkInitTypeDef rcc_clk_init_struct = {0};
+  RCC_PeriphCLKInitTypeDef periph_clk_init = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI48;
-  RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
-  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  rcc_osc_init_struct.OscillatorType = RCC_OSCILLATORTYPE_HSI48;
+  rcc_osc_init_struct.HSI48State = RCC_HSI48_ON;
+  rcc_osc_init_struct.PLL.PLLState = RCC_PLL_NONE;
+  if (HAL_RCC_OscConfig(&rcc_osc_init_struct) != HAL_OK)
   {
     Error_Handler();
   }
   /** Initializes the CPU, AHB and APB buses clocks
   */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+  rcc_clk_init_struct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI48;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  rcc_clk_init_struct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI48;
+  rcc_clk_init_struct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  rcc_clk_init_struct.APB1CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&rcc_clk_init_struct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2;
-  PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
-  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+  periph_clk_init.PeriphClockSelection = RCC_PERIPHCLK_USART2;
+  periph_clk_init.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
+  if (HAL_RCCEx_PeriphCLKConfig(&periph_clk_init) != HAL_OK)
   {
     Error_Handler();
   }
 }
-
-/* USER CODE BEGIN 4 */
-
-/* USER CODE END 4 */
 
 /**
   * @brief  This function is executed in case of error occurrence.
@@ -153,7 +194,6 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
   while (1)
   {
@@ -172,8 +212,7 @@ void Error_Handler(void)
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* User can add implementation to report file/line, e.g., printf */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
