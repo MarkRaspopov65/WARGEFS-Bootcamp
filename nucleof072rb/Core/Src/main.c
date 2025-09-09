@@ -49,8 +49,8 @@
 /* USER CODE BEGIN PV */
 uint8_t tx_buffer[3];   // Bytes sent to ADC
 uint8_t rx_buffer[3];   // Bytes received from ADC
-uint16_t adc_value;     // 10-bit ADC result
-#define adc_channel 0   // Change based on schematic connection
+uint16_t adc_value;
+#define adc_channel 0
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -105,16 +105,12 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while(1)
   {
-      // Read 10-bit ADC value (0-1023)
       adc_value = read_adc(adc_channel);
 
-      // Map ADC to PWM counts (1-2 ms pulse width)
       uint16_t pulse_counts = 500 + ((adc_value * 500) / 1023);
 
-      // Set PWM duty cycle
       __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_counts);
 
-      // Delay to prevent ADC overload
       HAL_Delay(10);
   }
 
@@ -126,21 +122,15 @@ uint16_t read_adc(uint8_t channel)
 {
     uint16_t value = 0;
 
-    // Bring CS low
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET); // adjust GPIO port/pin
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_RESET);
+    tx_buffer[0] = 0x01;
+    tx_buffer[1] = 0x80 | (channel << 4);
+    tx_buffer[2] = 0x00;
 
-    // Build command to send to ADC
-    tx_buffer[0] = 0x01; // start bit
-    tx_buffer[1] = 0x80 | (channel << 4); // single-ended + channel + leading zeros
-    tx_buffer[2] = 0x00; // third byte to receive remaining bits
-
-    // Send and receive 3 bytes over SPI (full duplex)
     HAL_SPI_TransmitReceive(&hspi1, tx_buffer, rx_buffer, 3, HAL_MAX_DELAY);
 
-    // Bring CS high
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET); // adjust GPIO port/pin
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
 
-    // Combine the received bits into 10-bit ADC value
     value = ((rx_buffer[1] & 0x03) << 8) | rx_buffer[2];
 
     return value;
