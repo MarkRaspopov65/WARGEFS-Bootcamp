@@ -107,7 +107,7 @@ int main(void)
   {
       adc_value = read_adc(adc_channel);
 
-      uint16_t pulse_counts = 500 + ((adc_value * 500) / 1023);
+      uint16_t pulse_counts = (adc_value * 65535) / 1023;
 
       __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_counts);
 
